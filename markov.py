@@ -1,7 +1,19 @@
 # -*- coding: utf-8 -*-
-
-from collections import defaultdict, Counter
+import abc
+from collections import *
 from itertools import chain
+
+class AbstractMarkov(object):
+    __metaclass__ = abc.ABCMeta
+    @abc.abstractmethod
+    def element_count(self): pass
+    @abc.abstractmethod
+    def elements(self): pass
+    @abc.abstractmethod
+    def add(self, sequence): pass
+    @abc.abstractmethod
+    def choices(self, sequence, direction='forward'): pass
+
 
 class Markov(object):
 
@@ -23,6 +35,12 @@ class Markov(object):
 
         self.order = order
         self.chains = [defaultdict(Counter) for d in Markov.directions]
+    
+    def element_count(self):
+        return len(self.chains[0])
+
+    def elements(self):
+        return self.chains[0].iterkeys()
 
     def __padded_sequences(self, sequence):
         """
@@ -68,6 +86,9 @@ class Markov(object):
         element_index = max(0, len(sequence) - self.order)
         element = sequence[element_index]
         subseq = tuple(sequence[element_index+1:])
+        # Optimization: don't create an empty Counter if none exists here.
+        if element not in self.chains[d]:
+            return choices
         # Compare the subsequence to the first `order`-minus-one elements or
         # the first sequence-length-minus-one elements, whichever is lower.
         choice_index = min(self.order, len(sequence)) - 1
@@ -78,3 +99,54 @@ class Markov(object):
                 # as a key.
                 choices[choice[choice_index:]] = weight
         return choices
+
+
+class CompositeMarkov(object):
+    
+    def __init__(self, max_instances, max_elements, order=1):
+        self.max_instances = max_instances
+        self.max_elements = max_elements
+        self.order = order
+        self.instances = deque()
+        self._add_instance()
+
+    def element_count(self):
+        return sum(instance.element_count() for instance in self.instances)
+    
+    def elements(self):
+        return chain(instance.elements() for instance in self.instances)
+
+    def _add_instance(self):
+        """
+        Add a new Markov instance to the start of the list.
+        """
+        self.instances.appendleft(Markov(self.order))
+
+    def add(self, *args, **kwargs):
+        """
+        Add a sequence of elements to the first Markov chain.
+
+        If this pushes the element count over the maximum, a new Markov chain
+        is pushed to the start of the list.  If that pushes the instance count
+        over the maximum, the oldest Markov chain is popped from the end.
+        """
+        self.instances[0].add(*args, **kwargs)
+        if self.instances[0].element_count() > self.max_elements:
+            self._add_instance()
+        if len(self.instances) > self.max_instances:
+            self.instances.pop()
+
+    def choices(self, *args, **kwargs):
+        """
+        Get a dict that maps possible subsequent states to their respective
+        weights.
+
+        This merges the choices given by each Markov instance using a Counter.
+        """
+        choices = Counter()
+        for instance in self.instances:
+            choices.update(instance.choices(*args, **kwargs))
+        return dict(choices)
+
+AbstractMarkov.register(Markov)
+AbstractMarkov.register(CompositeMarkov)

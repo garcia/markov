@@ -16,6 +16,11 @@ class AbstractMarkov(object):
 
 
 class Markov(object):
+    """
+    This class represents an nth-order Markov chain.  Sequences of elements
+    are processed such that each element is assigned a probability of being
+    preceded or succeeded by a sequence of n elements.
+    """
 
     class Endpoint(object):
         def __init__(self, name):
@@ -37,10 +42,17 @@ class Markov(object):
         self.chains = [defaultdict(Counter) for d in Markov.directions]
     
     def element_count(self):
+        """
+        Get the number of unique elements stored, including the start and end
+        markers.
+        """
         return len(self.chains[0])
 
     def elements(self):
-        return self.chains[0].iterkeys()
+        """
+        Get a list of all elements stored, including the start and end markers.
+        """
+        return self.chains[0].keys()
 
     def __padded_sequences(self, sequence):
         """
@@ -100,8 +112,17 @@ class Markov(object):
                 choices[choice[choice_index:]] = weight
         return choices
 
+AbstractMarkov.register(Markov)
+
 
 class CompositeMarkov(object):
+    """
+    This class implements the same interface as Markov, but manages multiple
+    Markov instances that expire after a certain number of add operations.
+    Read operations (e.g. the `elements` and `choices` methods) combine output
+    from all of the instances; write operations (`add`) only write to the most
+    recently created instance.
+    """
     
     def __init__(self, max_instances, max_elements, order=1):
         self.max_instances = max_instances
@@ -110,13 +131,27 @@ class CompositeMarkov(object):
         self.instances = deque()
         self._add_instance()
 
+    def __element_set(self):
+        """
+        Get a set of all elements across all stored Markov instances. Used
+        internally by `element_count` and `elements`.
+        """
+        return set(chain.from_iterable(instance.elements()
+            for instance in self.instances))
+
     def element_count(self):
-        return sum(instance.element_count() for instance in self.instances)
+        """
+        Get the number of unique elements across all stored Markov instances.
+        """
+        return len(self.__element_set())
     
     def elements(self):
-        return chain(instance.elements() for instance in self.instances)
+        """
+        Get a list of all unique elements across all stored Markov instances.
+        """
+        return list(self.__element_set())
 
-    def _add_instance(self):
+    def __add_instance(self):
         """
         Add a new Markov instance to the start of the list.
         """
@@ -127,12 +162,13 @@ class CompositeMarkov(object):
         Add a sequence of elements to the first Markov chain.
 
         If this pushes the element count over the maximum, a new Markov chain
-        is pushed to the start of the list.  If that pushes the instance count
-        over the maximum, the oldest Markov chain is popped from the end.
+        is added to the instance stack.  If that pushes the instance count
+        over the maximum, the oldest Markov chain is removed from the bottom of
+        the stack.
         """
         self.instances[0].add(*args, **kwargs)
         if self.instances[0].element_count() > self.max_elements:
-            self._add_instance()
+            self.__add_instance()
         if len(self.instances) > self.max_instances:
             self.instances.pop()
 
@@ -148,5 +184,4 @@ class CompositeMarkov(object):
             choices.update(instance.choices(*args, **kwargs))
         return dict(choices)
 
-AbstractMarkov.register(Markov)
 AbstractMarkov.register(CompositeMarkov)
